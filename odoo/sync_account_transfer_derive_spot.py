@@ -1,0 +1,132 @@
+#!/usr/bin/env python
+# -*- coding: utf-8 -*-
+"""
+日期    : 2023/1/11 7:02 PM
+作者    : wushuang
+功能    : 理财账户 划转到 现货账户
+参数    : 
+"""
+
+import os
+import sys
+import datetime
+
+filepath = os.path.abspath(__file__)
+filename = os.path.basename(filepath)
+curr_dir = os.path.dirname(filepath)
+bi_path = os.path.dirname(curr_dir)
+if sys.path[sys.path.__len__() - 1] != bi_path:
+    sys.path.append(bi_path)  # 引入新的模块路径
+
+from common.common_config import CommonConf
+import xmlrpc.client
+from common.util import Util
+from common.util_clickhouse import ClickHouseDb
+
+
+class DataProcess:
+    def __init__(self, stime, etime):
+        self.stime = datetime.datetime.strptime(stime, '%Y-%m-%d')
+        self.etime = datetime.datetime.strptime(etime, '%Y-%m-%d')
+        self.pid = "%d" % (os.getpid())
+        self.log = Util.get_logger(self.pid)
+        self.__ch_conn = ClickHouseDb("hw307")
+
+    def sync_spot_rebate(self):
+        odoo_activate = CommonConf.odoo15_conf['activate']
+        odoo_url = CommonConf.odoo15_conf[odoo_activate]['odoo_url']
+        db_name = CommonConf.odoo15_conf[odoo_activate]['db_name']
+        user_name = CommonConf.odoo15_conf[odoo_activate]['user_name']
+        pwd = CommonConf.odoo15_conf[odoo_activate]['pwd']
+        try:
+            # 查询充值明细 生成 journal item
+            spot_sql = """
+                select 
+                    b.id,
+                    round(cast(a.trans_num as double), 6) as coin_num,
+                    round(cast(a.trans_num * c.to_usd_rate as double), 6) as usd_num
+                from (select 
+                        currency_id, sum(num) as trans_num
+                    from df01.ods_iwala_derive_transfer
+                    where create_time >= '{}' and create_time < '{}'
+                    and status = 1 and transfer_type  = 2 and ref_type = 1 and member_id not in (
+                        select member_id
+                        from df01.ods_iwala_member 
+                        where member_id >= 100000
+                        and (email like '%%%%@iwala.net' 
+                        or email like '%%%%@digifinex.com' 
+                        or email like '%%%%@digifinex.org'
+                        or email like '%%%%@dftstat.com'
+                        or email like '%%%%@iboshu.com')
+                    )
+                    group by currency_id) a
+                join df01.ods_iwala_currency d on a.currency_id = d.currency_id 
+                join odoo.dim_odoo_currency b on d.currency_mark = b.full_name
+                left join df02.dim_currency_exchange_rate c on d.currency_mark = c.currency_mark 
+                where b.stime = '{}' and c.stime = '{}'
+            """.format(self.stime, self.etime, self.etime.date(), self.etime.date())
+            self.log.info("sql execute: {}".format(spot_sql))
+            self.__ch_conn.connect()
+            result = self.__ch_conn.execute(spot_sql)
+            journal_items = []
+            if result['code']:
+                if len(result['data']) == 0:
+                    self.log.info("no data found!")
+                    return True, None
+                # 生成journal entry
+                od_common = xmlrpc.client.ServerProxy('{}/xmlrpc/2/common'.format(odoo_url))
+                uid = od_common.authenticate(db_name, user_name, pwd, {})
+                od_models = xmlrpc.client.ServerProxy('{}/xmlrpc/2/object'.format(odoo_url))
+                journal_entry = {"date": str(self.stime.date()),
+                                 "ref": "user movement wealth to Spot",
+                                 "journal_id": 56,
+                                 "company_id": 24,
+                                 "currency_id": 2}
+                journal_entry_id = od_models.execute_kw(db_name, uid, pwd, 'account.move', 'create', [journal_entry])
+                for item in result['data']:
+                    debit_journal_item = {
+                         'move_id': journal_entry_id,
+                         'account_id': 1063,
+                         'amount_currency': float(item[1]),
+                         'currency_id': item[0],
+                         'analytic_account_id': 100,
+                         'debit': float(item[2])
+                    }
+                    journal_items.append(debit_journal_item)
+                    credit_journal_item = {
+                        'move_id': journal_entry_id,
+                        'account_id': 1067,
+                        'amount_currency': float(item[1]*-1),
+                        'currency_id': item[0],
+                        'analytic_account_id': 100,
+                        'credit': float(item[2])
+                    }
+                    journal_items.append(credit_journal_item)
+                od_models.execute_kw(db_name, uid, pwd, 'account.move.line', 'create', [journal_items])
+                # 更新凭证状态
+                # od_models.execute_kw(db_name, uid, pwd, 'account.move', 'write',
+                #                     [[journal_entry_id], {"state": "posted"}])
+            else:
+                self.log.info("sql execute error: {}".format(result['errmsg']))
+                return False, None
+        except Exception as ex:
+            self.log.error("odoo request Exception:%s", ex)
+            return False, None
+        return True, None
+
+
+def main():
+    stime = sys.argv[1]
+    etime = sys.argv[2]
+    dp = DataProcess(stime, etime)
+    func_list = ['sync_spot_rebate']
+    for func in func_list:
+        rst_code, rst_data = getattr(dp, func)()
+        if not rst_code:
+            dp.log.info(rst_data)
+            sys.exit(1)
+    dp.log.info('数据处理完成')
+
+
+if __name__ == '__main__':
+    main()

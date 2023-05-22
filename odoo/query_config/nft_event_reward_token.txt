@@ -1,0 +1,72 @@
+{
+    'ref': 'NFT User Reward - Currency',
+    'journal_id': 60,
+    'company_id': 24,
+    'currency_id': 2,
+    'debit': {
+        'account_id': 1179,
+        'analytic_account_id': 83
+    },
+    'credit': {
+        'account_id': 1063,
+        'analytic_account_id': None
+    },
+    
+    'query': '''
+with 
+	toDateTime('{s_time}') as s_time,
+	toDateTime('{e_time}') as e_time,
+	date(s_time) as s_date,
+	date(e_time) as e_date
+select
+	id,
+	round(toDecimal64(total_amount, 8), 6) as coin_num,
+	round(toDecimal64(total_amount * to_usd_rate, 8), 6) as coin_value_usd,
+	'NFT event reward - send token to user' as label
+from
+	(
+	select
+		oic.currency_mark as token,
+		sum(oif.money) as total_amount
+	from
+		df01.ods_iwala_finance oif
+	left join 
+		df01.ods_iwala_withdraw oiw on
+			oif.ref_id = oiw.id
+	left join 
+		df01.ods_iwala_currency oic on 
+			oif.currency_id = oic.currency_id
+	where
+		oif.member_id = 887676
+		and ((oif.`type` in (25) and oif.content = '提币'
+			and LOWER(oiw.to_address) not in ('0x4c3a221a0188b7f3668ef67f11a7b1f6bbbaec95', '0xfca252a831b15d52a89b11e9ee8235742f21010b', '0xfce7ba0674acd3fafa40e9da0b747605595780eb'))
+			or (oif.`type` in (51)))
+		and FROM_UNIXTIME(oif.add_time) >= s_time
+		and FROM_UNIXTIME(oif.add_time) < e_time
+	group by 	
+		oic.currency_mark ) A
+left join		
+(
+	select
+		id,
+		symbol
+	from
+		odoo.dim_odoo_currency doc
+	where
+		stime = s_date) B on
+	A.token = B.symbol
+left join
+(
+	select
+		to_usd_rate,
+		currency_mark
+	from
+		df02.dim_currency_exchange_rate dcer
+	where
+		stime = s_date) C on
+	A.symbol = C.currency_mark
+where
+	coin_num <> 0 
+	or coin_value_usd <> 0
+''' 
+}

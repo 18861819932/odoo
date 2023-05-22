@@ -1,0 +1,63 @@
+{
+    'ref': 'NFT Transfer to Digifinex',
+    'journal_id': 60,
+    'company_id': 24,
+    'currency_id': 2,
+    'debit': {
+        'account_id': 979,
+        'analytic_account_id': 100
+    },
+    'credit': {
+        'account_id': 979,
+        'analytic_account_id': 110
+    },
+    
+    'query': '''
+with 
+	toDateTime('{s_time}') as s_time,
+	toDateTime('{e_time}') as e_time,
+	date(s_time) as s_date,
+	date(e_time) as e_date
+select
+	id,
+	round(toDecimal64(total_amount, 8), 6) as coin_num,
+	round(toDecimal64(total_amount * to_usd_rate, 8), 6) as coin_value_usd,
+	label
+from
+	(
+	select
+		gmop2.paid_token as token,
+		gmop2.split_value as total_amount,
+		dcer.to_usd_rate as to_usd_rate,
+		CONCAT('#', toString(nft_id), ' - ', gmop.wallet_address, ' - ', gmop.contract_address, ' - ', toString(gmop.token_id)) as label
+	from
+		gamefi.gamefi_deposit_nft gdn
+	left join gamefi.gamefi_metamask_ops_price gmop on
+		lower(gdn.hash_id) = lower(gmop.hash)
+	left join gamefi.gamefi_metamask_ops_price gmop2 on
+		lower(gmop.parent_hash) = lower(gmop2.hash)
+		and lower(gmop.contract_address) = lower(gmop2.contract_address) 
+		and gmop.token_id = gmop2.token_id 
+	left join df02.dim_currency_exchange_rate dcer on
+		date(gmop2.`timestamp`) = dcer.stime 
+		and gmop2.paid_token = dcer.currency_mark
+	where
+		gdn.status = 3
+		and gdn.member_id = 887676
+		and gdn.`from` <> '0x0000000000000000000000000000000000000000'
+		and gdn.update_time >= s_time
+		and gdn.update_time < e_time) A
+left join		
+(
+	select
+		id,
+		symbol
+	from
+		odoo.dim_odoo_currency doc
+	where
+		stime = s_date) B on
+	A.token = B.symbol
+where
+	id <> 0
+''' 
+}

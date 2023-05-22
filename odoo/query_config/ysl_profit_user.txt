@@ -1,0 +1,73 @@
+{
+    'ref': 'MergedMiningIncomeSold',
+    'journal_id': 59,
+    'company_id': 24,
+    'currency_id': 2,
+    'debit': {
+        'account_id': 1095,
+        'analytic_account_id': 81
+    },
+    'credit': {
+        'account_id': 1067,
+        'analytic_account_id': None
+    },
+    
+    'query': '''
+with
+	toDateTime('{s_time}') as s_time,
+	toDateTime('{e_time}') as e_time,
+	date(s_time) as s_date,
+	date(e_time) as e_date
+select
+	id,
+	round(toDecimal64(total_amount,	8),	6) as coin_num,
+	round(toDecimal64(total_amount * to_usd_rate, 8), 6) as coin_value_usd,
+	label
+from
+	(
+	select
+		-- BTC直出
+		oic.currency_mark as token,
+		toDecimal64(sum(oimp_o.profit), 8) as total_amount,
+		'Profit' as label
+	from
+		ysl01.ods_iwala_mining_profit_user oimp_o
+	left join 
+	df01.ods_iwala_currency oic on 
+		oimp_o.currency_id = oic.currency_id
+	left join ysl01.ods_iwala_mining_products oimp on
+		oimp_o.product_id = oimp.id
+	where
+		date(oimp_o.mining_time) >= s_time
+		and date(oimp_o.mining_time) < e_time
+		and oimp.product_name not like '%%%%\[CS\]%%%%'
+		and oimp.id not in (1, 2, 3, 4, 5, 7, 8, 9, 10, 12, 13, 16)
+		and oimp_o.status = 1
+	group by
+		token,
+		label) A
+left join		
+(
+	select
+		id,
+		symbol
+	from
+		odoo.dim_odoo_currency doc
+	where
+		stime = s_date) B on
+	A.token = B.symbol
+left join
+(
+	select
+		to_usd_rate,
+		currency_mark
+	from
+		df02.dim_currency_exchange_rate dcer
+	where
+		stime = s_date) C on
+	A.symbol = C.currency_mark
+where
+	coin_num <> 0
+	or coin_value_usd <> 0
+''' 
+}

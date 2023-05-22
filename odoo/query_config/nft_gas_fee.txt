@@ -1,0 +1,65 @@
+{
+    'ref': 'NFT Gas Tx Fee',
+    'journal_id': 60,
+    'company_id': 24,
+    'currency_id': 2,
+    'debit': {
+        'account_id': 1185,
+        'analytic_account_id': 83
+    },
+    'credit': {
+        'account_id': 974,
+        'analytic_account_id': 110
+    },
+    
+    'query': '''
+with 
+	toDateTime('{s_time}') as s_time,
+	toDateTime('{e_time}') as e_time,
+	date(s_time) as s_date,
+	date(e_time) as e_date
+select
+	id,
+	round(toDecimal64(total_amount, 8), 6) as coin_num,
+	round(toDecimal64(total_amount * to_usd_rate, 8), 6) as coin_value_usd,
+	label
+from
+	(
+	select
+		case when blockchain = 'etherscan' then 'ETH' when blockchain = 'polygonscan' then 'MATIC' when blockchain = 'bscscan' then 'BNB' end as token,
+		sum(CAST(gas_price,	'Int64') * CAST(gas_used, 'Int64') / pow(10, 18)) as total_amount,
+		lower(wallet_address) as label
+	from
+		gamefi.dwd_metamask_transaction dmt
+	where
+		dmt.wallet_address = dmt.`from`
+		and FROM_UNIXTIME(CAST(`timestamp` , 'Int64')) >= s_time
+		and FROM_UNIXTIME(CAST(`timestamp` , 'Int64')) < e_time
+	group by 
+		token,
+		label) A
+left join		
+(
+	select
+		id,
+		symbol
+	from
+		odoo.dim_odoo_currency doc
+	where
+		stime = s_date) B on
+	A.token = B.symbol
+left join
+(
+	select
+		to_usd_rate,
+		currency_mark
+	from
+		df02.dim_currency_exchange_rate dcer
+	where
+		stime = s_date) C on
+	A.symbol = C.currency_mark
+where
+	coin_num <> 0 
+	or coin_value_usd <> 0
+''' 
+}

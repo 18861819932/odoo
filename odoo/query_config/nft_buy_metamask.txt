@@ -1,0 +1,55 @@
+{
+    'ref': 'NFT Purchased from Metamask',
+    'journal_id': 60,
+    'company_id': 24,
+    'currency_id': 2,
+    'debit': {
+        'account_id': 979,
+        'analytic_account_id': 110
+    },
+    'credit': {
+        'account_id': 974,
+        'analytic_account_id': 110
+    },
+    
+    'query': '''
+with 
+	toDateTime('{s_time}') as s_time,
+	toDateTime('{e_time}') as e_time,
+	date(s_time) as s_date,
+	date(e_time) as e_date
+select
+	id,
+	round(toDecimal64(total_amount, 8), 6) as coin_num,
+	round(toDecimal64(total_amount * to_usd_rate, 8), 6) as coin_value_usd,
+	label
+from
+	(
+	select
+		gmop.paid_token as token,
+		gmop.split_value as total_amount,
+		dcer.to_usd_rate as to_usd_rate,
+		CONCAT(wallet_address, ' - ', contract_address, ' - ', toString(token_id)) as label
+	from
+		gamefi.gamefi_metamask_ops_price gmop
+	left join df02.dim_currency_exchange_rate dcer on
+		date(gmop.`timestamp`) = dcer.stime 
+		and gmop.paid_token = dcer.currency_mark
+	where
+		lower(wallet_address) = lower(`to`)
+		and `timestamp` >= s_time
+		and `timestamp` < e_time) A
+left join		
+(
+	select
+		id,
+		symbol
+	from
+		odoo.dim_odoo_currency doc
+	where
+		stime = s_date) B on
+	A.token = B.symbol
+where
+	id <> 0
+''' 
+}

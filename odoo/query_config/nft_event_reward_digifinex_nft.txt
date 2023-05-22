@@ -1,0 +1,94 @@
+{
+    'ref': 'NFT User Reward - NFT',
+    'journal_id': 60,
+    'company_id': 24,
+    'currency_id': 2,
+    'debit': {
+        'account_id': 1179,
+        'analytic_account_id': 83
+    },
+    'credit': {
+        'account_id': 1073,
+        'analytic_account_id': None
+    },
+    
+    'query': '''
+with 
+	toDateTime('{s_time}') as s_time,
+	toDateTime('{e_time}') as e_time,
+	date(s_time) as s_date,
+	date(e_time) as e_date
+select
+	id,
+	round(toDecimal64(total_amount, 8), 6) as coin_num,
+	round(toDecimal64(total_amount * to_usd_rate, 8), 6) as coin_value_usd,
+	label
+from
+	(
+	select
+		'NFT000' as token,
+		1 as total_amount,
+		CONCAT('#', toString(gnf.nft_id)) as label
+	from
+		gamefi.gamefi_nft_finance gnf
+	where
+		member_id = 887676
+		and finance_type in (13, 15)
+		and nft_id in (
+		select
+			gn.nft_id
+		from
+			gamefi.gamefi_nft gn
+		left join (
+			select
+				nft_id,
+				min(add_time) as first_deposit_time
+			from
+				gamefi.gamefi_deposit_nft gdn
+			where
+				status = 3
+			group by
+				nft_id) gdn on
+			gn.nft_id = gdn.nft_id
+		where
+			(gn.create_time < gdn.first_deposit_time
+				or gdn.nft_id = 0)
+		order by
+			gn.nft_id
+		union all
+		select
+			nft_id
+		from
+			gamefi.gamefi_deposit_nft gdn
+		where
+			status = 3
+			and member_id = 887676
+			and `from` = '0x0000000000000000000000000000000000000000'
+		)
+		and gnf.create_time >= s_time
+		and gnf.create_time < e_time) A
+left join		
+(
+	select
+		id,
+		symbol
+	from
+		odoo.dim_odoo_currency doc
+	where
+		stime = s_date) B on
+	A.token = B.symbol
+left join
+(
+	select
+		to_usd_rate,
+		currency_mark
+	from
+		df02.dim_currency_exchange_rate dcer
+	where
+		stime = s_date) C on
+	A.symbol = C.currency_mark
+where
+	coin_num <> 0 
+	or coin_value_usd <> 0
+''' 
+}

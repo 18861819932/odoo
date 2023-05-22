@@ -1,0 +1,62 @@
+{
+    'ref': 'NFT Raffle Sales - deferred profit closing',
+    'journal_id': 60,
+    'company_id': 24,
+    'currency_id': 2,
+    'debit': {
+        'account_id': 1046,
+        'analytic_account_id': None
+    },
+    'credit': {
+        'account_id': 1101,
+        'analytic_account_id': 83
+    },
+    
+    'query': '''
+with 
+	toDateTime('{s_time}') as s_time,
+	toDateTime('{e_time}') as e_time,
+	date(s_time) as s_date,
+	date(e_time) as e_date
+select
+	id,
+	round(toDecimal64(total_amount, 8), 6) as coin_num,
+	round(toDecimal64(total_amount_usd, 8), 6) as coin_value_usd,
+	label
+from
+	(
+	select
+		CONCAT('#', toString(glnt.nft_id)) as label,
+		oic.currency_mark as token,
+		sum(glpr.purchase_price) as total_amount,
+		sum(glpr.purchase_price * dcer.to_usd_rate) as total_amount_usd
+	from
+		gamefi.gamefi_lottery_nft_transaction glnt
+	left join gamefi.gamefi_lottery_participation_record glpr on
+		glnt.activity_id = glpr.activity_id 
+	left join df01.ods_iwala_currency oic on 
+		glpr.purchase_price_currency_id = oic.currency_id
+	left join df02.dim_currency_exchange_rate dcer on
+		date(glpr.participation_time) = dcer.stime 
+		and oic.currency_mark = dcer.currency_mark 
+	where
+		glnt.create_time >= s_time
+		and glnt.create_time < e_time
+	group by 
+		oic.currency_mark,
+		label) A
+left join		
+(
+	select
+		id,
+		symbol
+	from
+		odoo.dim_odoo_currency doc
+	where
+		stime = s_date) B on
+	A.token = B.symbol
+where
+	coin_num <> 0 
+	or coin_value_usd <> 0
+''' 
+}

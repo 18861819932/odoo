@@ -1,0 +1,66 @@
+{
+    'ref': 'NFT Trade Tx fee Charged',
+    'journal_id': 60,
+    'company_id': 24,
+    'currency_id': 2,
+    'debit': {
+        'account_id': 1063,
+        'analytic_account_id': None
+    },
+    'credit': {
+        'account_id': 1086,
+        'analytic_account_id': 83
+    },
+    
+    'query': '''
+with 
+	toDateTime('{s_time}') as s_time,
+	toDateTime('{e_time}') as e_time,
+	date(s_time) as s_date,
+	date(e_time) as e_date
+select
+	id,
+	round(toDecimal64(total_amount, 8), 6) as coin_num,
+	round(toDecimal64(total_amount * to_usd_rate, 8), 6) as coin_value_usd,
+	'NFT trading fee' as label
+from
+	(
+	select
+		oic.currency_mark as token,
+		sum(gnt.trade_fee) as total_amount
+	from
+		gamefi.gamefi_nft_trade gnt
+	left join 
+			df01.ods_iwala_currency oic on 
+				gnt.fee_currency_id = oic.currency_id
+	where 
+		gnt.trade_fee <> 0
+		and gnt.create_time >= s_time
+		and gnt.create_time < e_time
+	group by
+		oic.currency_mark) A
+left join		
+(
+	select
+		id,
+		symbol
+	from
+		odoo.dim_odoo_currency doc
+	where
+		stime = s_date) B on
+	A.token = B.symbol
+left join
+(
+	select
+		to_usd_rate,
+		currency_mark
+	from
+		df02.dim_currency_exchange_rate dcer
+	where
+		stime = s_date) C on
+	A.symbol = C.currency_mark
+where
+	coin_num <> 0 
+	or coin_value_usd <> 0
+''' 
+}

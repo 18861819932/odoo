@@ -1,0 +1,184 @@
+{
+    'ref': 'MergedMincomeforPower',
+    'journal_id': 59,
+    'company_id': 24,
+    'currency_id': 2,
+    
+    'query': '''
+with 
+	toDateTime('{s_time}') as s_time,
+	toDateTime('{e_time}') as e_time,
+	date(s_time) as s_date,
+	date(e_time) as e_date
+select
+	id,
+	round(toDecimal64(total_amount,	8),	6) as coin_num,
+	round(toDecimal64(total_amount * to_usd_rate, 8), 2) as coin_value_usd,
+	label,
+	`C/D`,
+	account,
+	analytic
+from
+	(
+	select
+		-- 電費扣繳，使用的BTC
+		oic.currency_mark as token,
+		toDecimal64(sum(oimp_t.ele_fee), 8) as total_amount,
+		'[Rounding Diff] Income to Electricity bill' as label,
+		case when toDecimal64(sum(oimp_t.ele_fee), 8) > 0 then 'Debit' else 'Credit' end as `C/D`,
+		1067 as account,
+		0 as analytic
+	from
+		ysl01.ods_iwala_mining_profit_user oimp_t
+	left join 
+	ysl01.ods_iwala_mining_electric_bill oimeb on
+		oimp_t.order_id = oimeb.order_id
+		and date(oimp_t.mining_time) = date(FROM_UNIXTIME(oimeb.fee_date))
+	left join 
+	df01.ods_iwala_currency oic on 
+		oimp_t.currency_id = oic.currency_id
+	left join ysl01.ods_iwala_mining_products oimp on
+		oimp_t.product_id = oimp.id
+	where
+		date(oimp_t.mining_time) >= s_time
+		and date(oimp_t.mining_time) < e_time
+		and oimp_t.ele_fee <> 0
+		and oimp.product_name not like '%%%%\[CS\]%%%%'
+		and oimp.id not in (1, 2, 3, 4, 5, 7, 8, 9, 10, 12, 13, 16)
+		and oimp_t.status = 1
+	group by
+		token,
+		label
+union all
+	select
+		-- 電費扣繳，當日電費的USDT
+		'USDT' as token,
+		toDecimal64(sum(oimeb.fee_amount) * -1, 8) as total_amount,
+		'Electricity bill to USDT' as label,
+		case when toDecimal64(sum(oimeb.fee_amount) * -1, 8) > 0 then 'Debit' else 'Credit' end as `C/D`,
+		1072 as account,
+		0 as analytic
+	from
+		ysl01.ods_iwala_mining_profit_user oimp_e
+	left join 
+	ysl01.ods_iwala_mining_electric_bill oimeb on
+		oimp_e.order_id = oimeb.order_id
+		and date(oimp_e.mining_time) = date(FROM_UNIXTIME(oimeb.fee_date))
+	left join 
+	df01.ods_iwala_currency oic on 
+		oimp_e.currency_id = oic.currency_id
+	left join
+	ysl01.ods_iwala_mining_products oimp on
+		oimp_e.product_id = oimp.id
+	where
+		date(oimp_e.mining_time) >= s_time
+		and date(oimp_e.mining_time) < e_time
+		and oimp_e.ele_fee <> 0
+		and oimeb.status = 1
+		and oimp.product_name not like '%%%%\[CS\]%%%%'
+		and oimp.id not in (1, 2, 3, 4, 5, 7, 8, 9, 10, 12, 13, 16)
+		and oimp_e.status = 1
+	group by
+		token,
+		label
+union all
+	select
+		-- 電費扣繳，扣完電費後剩下的USDT
+		'USDT' as token,
+		toDecimal64(sum(oimp_b.back_usdt) * -1, 8) as total_amount,
+		'USDT return' as label,
+		case when toDecimal64(sum(oimp_b.back_usdt) * -1, 8) > 0 then 'Debit' else 'Credit' end as `C/D`,
+		1067 as account,
+		0 as analytic
+	from
+		ysl01.ods_iwala_mining_profit_user oimp_b
+	left join 
+	df01.ods_iwala_currency oic on 
+		oimp_b.currency_id = oic.currency_id
+	left join ysl01.ods_iwala_mining_products oimp on
+		oimp_b.product_id = oimp.id
+	where
+		date(oimp_b.mining_time) >= s_time
+		and date(oimp_b.mining_time) < e_time
+		and oimp_b.ele_fee <> 0
+		and oimp.product_name not like '%%%%\[CS\]%%%%'
+		and oimp.id not in (1, 2, 3, 4, 5, 7, 8, 9, 10, 12, 13, 16)
+		and oimp_b.status = 1
+	group by
+		token,
+		label
+union all
+	select
+		-- BTC與USDT匯差
+		'USDT' as token,
+		toDecimal64(sum(oimp_e.ele_fee * cc.to_usdt_rate - oimp_e.back_usdt - oimeb.fee_amount) * -1, 8) as total_amount,
+		'Diff. between Income and USDT' as label,
+		case when toDecimal64(sum(oimp_e.ele_fee * cc.to_usdt_rate - oimp_e.back_usdt - oimeb.fee_amount) * -1, 8) > 0 then 'Debit' else 'Credit' end as `C/D`,
+		1196 as account,
+		81 as analytic
+	from
+		ysl01.ods_iwala_mining_profit_user oimp_e
+	left join 
+	ysl01.ods_iwala_mining_electric_bill oimeb on
+		oimp_e.order_id = oimeb.order_id
+		and date(oimp_e.mining_time) = date(FROM_UNIXTIME(oimeb.fee_date))
+	left join 
+	df01.ods_iwala_currency oic on 
+		oimp_e.currency_id = oic.currency_id
+	left join
+	ysl01.ods_iwala_mining_products oimp on
+		oimp_e.product_id = oimp.id
+	left join		
+	(
+		select
+			currency_id,
+			currency_mark
+		from
+			df01.ods_iwala_currency oic) bb on
+		oimp_e.currency_id  = bb.currency_id
+	left join
+	(
+	select
+			to_usdt_rate,
+			currency_mark
+		from
+			df02.dim_currency_exchange_rate dcer
+		where
+			stime = s_date) cc on
+		bb.currency_mark = cc.currency_mark
+	where
+		date(oimp_e.mining_time) >= s_time
+		and date(oimp_e.mining_time) < e_time
+		and oimp_e.ele_fee <> 0
+		and oimeb.status = 1
+		and oimp.product_name not like '%%%%\[CS\]%%%%'
+		and oimp.id not in (1, 2, 3, 4, 5, 7, 8, 9, 10, 12, 13, 16)
+		and oimp_e.status = 1
+	group by
+		token,
+		label) A
+left join		
+(
+	select
+		id,
+		symbol
+	from
+		odoo.dim_odoo_currency doc
+	where
+		stime = s_date) B on
+	A.token = B.symbol
+left join
+(
+	select
+		to_usd_rate,
+		currency_mark
+	from
+		df02.dim_currency_exchange_rate dcer
+	where
+		stime = s_date) C on
+	A.symbol = C.currency_mark
+where
+	coin_num <> 0
+	or coin_value_usd <> 0
+''' 
+}

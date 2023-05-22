@@ -1,0 +1,71 @@
+{
+    'ref': 'MergedMPowerBill',
+    'journal_id': 59,
+    'company_id': 24,
+    'currency_id': 2,
+    'debit': {
+        'account_id': 1158,
+        'analytic_account_id': 81
+    },
+    'credit': {
+        'account_id': 1071,
+        'analytic_account_id': None
+    },
+    
+    'query': '''
+with 
+	toDateTime('{s_time}') as s_time,
+	toDateTime('{e_time}') as e_time,
+	date(s_time) as s_date,
+	date(e_time) as e_date
+select
+	id,
+	round(toDecimal64(total_amount,	8),	6) as coin_num,
+	round(toDecimal64(total_amount * to_usd_rate, 8), 6) as coin_value_usd
+from
+	(
+	select
+		'USDT' as token,
+		sum(total_num * avg_price) as total_amount
+	from
+		(
+		select
+			oimp.id,
+			oimp.total_num,
+			avg(oimeb.price) as avg_price
+		from
+			ysl01.ods_iwala_mining_electric_bill oimeb
+		left join ysl01.ods_iwala_mining_products oimp on
+			oimeb.product_id = oimp.id
+		where
+			oimp.product_name not like '%%%%\[CS\]%%%%'
+			and date(FROM_UNIXTIME(fee_date)) >= s_time
+			and date(FROM_UNIXTIME(fee_date)) < e_time
+		group by
+			oimp.id,
+			oimp.total_num)) A
+left join		
+(
+	select
+		id,
+		symbol
+	from
+		odoo.dim_odoo_currency doc
+	where
+		stime = s_date) B on
+	A.token = B.symbol
+left join
+(
+	select
+		to_usd_rate,
+		currency_mark
+	from
+		df02.dim_currency_exchange_rate dcer
+	where
+		stime = s_date) C on
+	A.symbol = C.currency_mark
+where
+	coin_num <> 0 
+	or coin_value_usd <> 0
+''' 
+}
