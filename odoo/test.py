@@ -32,7 +32,7 @@ if __name__ == "__main__":
     odoo_url = "https://od.digifinex.org"
     db_name = "odoo15backup"
     user_name = "york_xiong@digifinex.org"
-    pwd = "f2b5ac33192d1acae52c5b42cbd12747f5ebe6dc"
+    pwd = "*************"
     common = xmlrpc.client.ServerProxy('{}/xmlrpc/2/common'.format(odoo_url))
     # common.version()
     uid = common.authenticate(db_name, user_name, pwd, {})
